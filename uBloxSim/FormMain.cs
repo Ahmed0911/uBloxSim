@@ -79,12 +79,140 @@ namespace uBloxSim
             }
         }
 
-        // TODO!!!
         private void SendUBLOXHNRPVTMsg(SerialPort serialPrt, STargetPoint targetPoint)
         {
-            byte[] buffer = new byte[100];
-            serialPrt.Write(buffer, 0, buffer.Length);
+            byte[] dataToSend = GenerateHNRPVTMSG(targetPoint);
+            serialPrt.Write(dataToSend, 0, dataToSend.Length);
         }
+
+
+        // Custom TX Messages
+        byte[] GenerateHNRPVTMSG(STargetPoint targetPoint)
+        {
+            byte[] localBuffer = new byte[72];
+
+            // add data type to data            
+            uint gpsTimeMS = (uint)DateTime.Now.TimeOfDay.TotalMilliseconds; // miliseconds from start of day, SHOULD BE START OF WEEK!)
+            byte[] gpsTimeArr = BitConverter.GetBytes(gpsTimeMS);
+            byte[] yearUTCArr = BitConverter.GetBytes((UInt16)2017);
+
+            byte[] longitudeArr = BitConverter.GetBytes((int)(targetPoint.Longitude * 1e7));
+            byte[] latitudeArr  = BitConverter.GetBytes((int)(targetPoint.Latitude * 1e7));
+
+            byte[] heightArr = BitConverter.GetBytes((int)120 * 1000);
+            byte[] heightMSLArr = BitConverter.GetBytes((int)150 * 1000);
+
+            byte[] speedArr = BitConverter.GetBytes((int)30 * 1000);
+
+            double heading = Math.Atan2(DeltaDirection.X, DeltaDirection.Y) * 180/Math.PI;
+            byte[] headingArr = BitConverter.GetBytes((int)(heading*1e5));
+
+            byte[] accArr = BitConverter.GetBytes((uint)(950)); // mm
+            byte[] accHdgArr = BitConverter.GetBytes((uint)(1.5*1e5)); // mm
+
+            gpsTimeArr.CopyTo(localBuffer, 0); // gps time
+            yearUTCArr.CopyTo(localBuffer, 4); // year
+            localBuffer[6] = (byte)DateTime.Now.Month; // month
+            localBuffer[7] = (byte)DateTime.Now.Day; // day
+            localBuffer[8] = (byte)DateTime.Now.Hour; // hour
+            localBuffer[9] = (byte)DateTime.Now.Minute; // minute
+            localBuffer[10] = (byte)DateTime.Now.Second; // second
+            localBuffer[11] = 0x07; // Valid flags
+            localBuffer[16] = 0x04; // GPS + DR
+            localBuffer[17] = 0x1D; // GPSFIxOK, WKNSET, TOWSET, headingValid
+            localBuffer[18] = 0x00; // Reserved
+            localBuffer[19] = 0x00; // Reserved
+            longitudeArr.CopyTo(localBuffer, 20);
+            latitudeArr.CopyTo(localBuffer, 24);
+
+            heightArr.CopyTo(localBuffer, 28);
+            heightMSLArr.CopyTo(localBuffer, 32);
+
+            speedArr.CopyTo(localBuffer, 36); // ground speed
+            speedArr.CopyTo(localBuffer, 40); // 3D Speed
+
+            headingArr.CopyTo(localBuffer, 44); // Heading of motion
+            headingArr.CopyTo(localBuffer, 48); // Heading of vehicle
+
+            accArr.CopyTo(localBuffer, 52); // horizontal accuracy
+            accArr.CopyTo(localBuffer, 56); // vertical accuracy
+            accArr.CopyTo(localBuffer, 60); // speed accuracy
+
+            accHdgArr.CopyTo(localBuffer, 64); // heading acc
+            
+            return GenerateUbloxTXPacket(0x28, 0x00, localBuffer, 72);
+        }
+
+        byte[] GenerateESFMeasMSG(uint timetag, byte dataTypeID, uint providerData)
+        {
+            byte[] localBuffer = new byte[12];
+
+            // add data type to data
+            providerData = (providerData & 0x00FFFFFF) + (uint)(dataTypeID << 24);
+
+            byte[] timeTagArr = BitConverter.GetBytes(timetag);
+            byte[] providerDataArr = BitConverter.GetBytes(providerData);
+
+            timeTagArr.CopyTo(localBuffer, 0);
+            localBuffer[4] = 0; // flags = 0
+            localBuffer[5] = 0; // flags = 0
+            localBuffer[6] = 0; // Data Provider = 0
+            localBuffer[7] = 0; // Data Provider = 0
+
+            providerDataArr.CopyTo(localBuffer, 8); // data (speed)
+
+            return GenerateUbloxTXPacket(0x10, 0x02, localBuffer, 12);
+        }
+
+        // uBlox Generator
+        private byte[] GenerateUbloxTXPacket(byte classID, byte id, byte[] data, int length)
+        {
+            byte[] packet = new byte[length + 8];
+            // assemble header
+            packet[0] = 0xB5; // SYNC1
+            packet[1] = 0x62; // SYNC2
+            packet[2] = classID; // CLASS
+            packet[3] = id; // ID
+            packet[4] = (byte)(length % 256);
+            packet[5] = (byte)(length / 256);
+
+            // copy payload
+            data.CopyTo(packet, 6);
+
+            // add checksum
+            CHKSUM chk = CalculateCheckSum(packet, length);
+            packet[length + 6] = chk.CK_A;
+            packet[length + 7] = chk.CK_B;
+
+            return packet; // return total packet, length: (2xSYNC + CLASS + ID + 2xLEN + 2xCHKSUM + LENGTH) (data+8)
+        }
+
+        private struct CHKSUM
+        {
+            public byte CK_A;
+            public byte CK_B;
+        };
+
+        // packet is whole packet (starts with SYNC1), chk "data" is 4 bytes longer
+        CHKSUM CalculateCheckSum(byte[] packet, int length)
+        {
+            byte ck_A = 0;
+            byte ck_B = 0;
+
+            for (int i = 2; i != length + 4 + 2; i++)
+            {
+                ck_A = (byte)(ck_A + packet[i]);
+                ck_B = (byte)(ck_B + ck_A);
+            }
+
+            CHKSUM chk;
+            chk.CK_A = ck_A;
+            chk.CK_B = ck_B;
+
+            return chk;
+        }
+
+      
 
         // Open Comm Port
         private void buttonOpen_Click(object sender, EventArgs e)
