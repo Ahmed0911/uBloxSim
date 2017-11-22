@@ -105,6 +105,7 @@ namespace uBloxSim
             byte[] speedArr = BitConverter.GetBytes((int)30 * 1000);
 
             double heading = Math.Atan2(DeltaDirection.X, DeltaDirection.Y) * 180/Math.PI;
+            if (heading < 0) heading += 360;
             byte[] headingArr = BitConverter.GetBytes((int)(heading*1e5));
 
             byte[] accArr = BitConverter.GetBytes((uint)(950)); // mm
